@@ -230,21 +230,23 @@ def _chart_to_base64(fig):
 
 
 def _chart_to_base64_optimized(fig):
-    """Optimized base64 encoder — smaller output for faster streaming.
+    """Aggressively optimized base64 — JPEG, low DPI, small output.
 
-    Uses lower DPI (100 vs 150) and PNG compression.
-    Typical output: ~30-50KB base64 vs ~100-150KB original.
+    Target: ~10-20KB base64 (vs ~100-150KB original PNG).
+    JPEG is ~5x smaller than PNG for charts with solid colors.
     """
     import matplotlib.pyplot as plt
     plt.tight_layout()
     buf = io.BytesIO()
-    fig.savefig(buf, format="png", dpi=100, bbox_inches="tight",
-                facecolor=fig.get_facecolor(), pad_inches=0.2)
+    # Use JPEG for much smaller file size (charts don't need PNG transparency)
+    fig.savefig(buf, format="jpg", dpi=80, bbox_inches="tight",
+                facecolor=fig.get_facecolor(), pad_inches=0.15,
+                pil_kwargs={"quality": 85, "optimize": True})
     buf.seek(0)
     b64 = base64.b64encode(buf.read()).decode("utf-8")
     buf.close()
     plt.close(fig)
-    return b64
+    return b64, "jpeg"
 
 
 def _render_chart_fig(plan, columns, rows, style_name):
@@ -456,6 +458,82 @@ def _render_chart_fig(plan, columns, rows, style_name):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# TEXT CHART RENDERER (instant, no image)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _render_text_chart(plan, columns, rows):
+    """Render a chart using Unicode block characters. Instant, no matplotlib.
+
+    Output looks like:
+    **Top 5 Suppliers by Spend (EUR)**
+
+    MOTHERSON ELECTRO..  ████████████████████████████  96,010,720
+    NOVEM CAR INTERIO..  ███████████████████████████   93,123,977
+    EISSMANN AUTOMOTI..  ██████████████████████████    90,512,369
+    KROMBERG & SCHUBE..  ██████████████              51,183,135
+    KOSTAL MEXICANA S..  █████████                   34,309,792
+    """
+    x_col = plan.get("x_column", 0)
+    y_cols = plan.get("y_columns", [1])
+    title = plan.get("title", "Chart")
+    sort_by_value = plan.get("sort_by_value", True)
+    sort_desc = plan.get("sort_descending", True)
+    chart_type = plan.get("chart_type", "bar")
+
+    if not y_cols or not rows:
+        return None
+
+    y_col = y_cols[0]
+
+    def _safe_float(v):
+        if v is None:
+            return 0
+        try:
+            return float(str(v).replace(",", ""))
+        except (ValueError, TypeError):
+            return 0
+
+    # Prepare data
+    work_rows = list(rows)
+    if sort_by_value:
+        work_rows.sort(key=lambda r: _safe_float(r[y_col] if y_col < len(r) else 0), reverse=sort_desc)
+
+    top_n = plan.get("top_n")
+    if top_n and len(work_rows) > top_n:
+        work_rows = work_rows[:top_n]
+
+    labels = [str(r[x_col])[:22] if x_col < len(r) else "?" for r in work_rows]
+    values = [_safe_float(r[y_col] if y_col < len(r) else 0) for r in work_rows]
+    max_val = max(values) if values else 1
+    max_bar_width = 30
+
+    # Build text chart
+    lines = [f"**{title}**\n"]
+    lines.append("```")
+
+    # Determine label width
+    label_width = max(len(l) for l in labels) if labels else 10
+    label_width = min(label_width, 22)
+
+    for label, val in zip(labels, values):
+        bar_len = int((val / max_val) * max_bar_width) if max_val > 0 else 0
+        bar = "\u2588" * bar_len
+        # Format value
+        if abs(val) >= 1_000_000:
+            val_str = f"{val:>14,.0f}"
+        elif abs(val) >= 1:
+            val_str = f"{val:>14,.2f}"
+        else:
+            val_str = f"{val:>14.4f}"
+        lines.append(f"  {label:<{label_width}}  {bar:<{max_bar_width}}  {val_str}")
+
+    lines.append("```")
+    lines.append(f"\n*{len(work_rows)} items | {chart_type}*")
+
+    return "\n".join(lines)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # COMPONENT
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -480,8 +558,8 @@ class CodeEditorNode(Node):
             name="llm",
             display_name="Language Model",
             input_types=["LanguageModel"],
-            info="LLM for intelligent chart planning and data extraction.",
-            required=True,
+            info="Optional LLM for smart chart planning. If not connected, uses auto-detection (faster).",
+            required=False,
         ),
         DropdownInput(
             name="chart_style",
@@ -489,6 +567,13 @@ class CodeEditorNode(Node):
             options=["corporate", "modern", "executive"],
             value="corporate",
             info="Visual style preset.",
+        ),
+        DropdownInput(
+            name="render_mode",
+            display_name="Render Mode",
+            options=["text", "image"],
+            value="text",
+            info="'text' = instant Unicode bar chart (no image). 'image' = matplotlib PNG via base64 (slower but prettier).",
         ),
     ]
 
@@ -505,7 +590,7 @@ class CodeEditorNode(Node):
         data = None
         instructions = raw_input
 
-        # Try parsing data_json tags or JSON
+        # Try parsing data_json (HTML comment or tag format)
         parsed, remaining = _try_parse_data_json(raw_input)
         if parsed:
             data = parsed
@@ -516,13 +601,25 @@ class CodeEditorNode(Node):
             parsed = _try_parse_markdown_table(raw_input)
             if parsed:
                 data = parsed
-                # Instructions = anything that's not the table
                 non_table_lines = [l for l in raw_input.split("\n") if not l.strip().startswith("|")]
                 instructions = "\n".join(non_table_lines).strip() or "visualize this data"
 
-        # Last resort: ask LLM to extract data from text
+        # Try raw JSON
         if not data:
-            data = self._llm_extract_data(raw_input, instructions)
+            try:
+                raw_json = json.loads(raw_input.strip())
+                if isinstance(raw_json, dict) and raw_json.get("columns") and raw_json.get("rows"):
+                    data = raw_json
+                    instructions = "visualize this data"
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # Last resort: ask LLM to extract (only if LLM is connected)
+        if not data and self.llm and self.llm != "":
+            try:
+                data = self._llm_extract_data(raw_input, instructions)
+            except Exception:
+                pass
 
         if not data or not data.get("columns") or not data.get("rows"):
             return Message(text="Could not extract chartable data from the input. Please provide a data table or data_json.")
@@ -530,36 +627,57 @@ class CodeEditorNode(Node):
         columns = data["columns"]
         rows = data["rows"]
 
-        # ── Step 2: LLM Chart Planning ──
-        plan = self._llm_plan_chart(columns, rows, instructions)
+        # ── Step 2: Chart Planning (heuristic first, LLM optional) ──
+        plan = self._auto_plan_chart(columns, rows, instructions)
+
+        # If LLM is connected, try to enhance the plan (with timeout protection)
+        if self.llm and self.llm != "":
+            try:
+                llm_plan = self._llm_plan_chart(columns, rows, instructions)
+                if llm_plan and llm_plan.get("chart_type"):
+                    plan = llm_plan
+            except Exception:
+                pass  # Keep heuristic plan
+
+        # Validate and fix axes
+        plan = self._validate_and_fix_plan(plan, columns, rows)
 
         # ── Step 3: Render Chart ──
         try:
             chart_type = plan.get("chart_type", "bar")
 
-            # Fallback to table if LLM says so
             if chart_type == "table":
                 return self._render_as_table(columns, rows, plan.get("title", "Data"))
 
-            # Render the chart — base64 inline (tool framework strips Message.files)
+            # Data JSON for follow-up chart modifications
+            data_json_obj = {"columns": columns, "rows": rows}
+            data_comment = f"\n<!-- data_json:{json.dumps(data_json_obj)} -->"
+
+            # ── Text mode: instant Unicode chart (default) ──
+            if self.render_mode == "text":
+                text_chart = _render_text_chart(plan, columns, rows)
+                if text_chart:
+                    self.status = f"{chart_type} | {len(rows)} rows | text"
+                    return Message(text=text_chart + data_comment)
+                # Fallback to table if text chart fails
+                return self._render_as_table(columns, rows, plan.get("title", "Data"))
+
+            # ── Image mode: matplotlib → base64 JPEG ──
             fig = _render_chart_fig(plan, columns, rows, self.chart_style)
-            b64_image = _chart_to_base64_optimized(fig)
+            b64_image, img_format = _chart_to_base64_optimized(fig)
 
             title = plan.get("title", "Chart")
             parts = []
-            parts.append(f"![{title}](data:image/png;base64,{b64_image})")
+            parts.append(f"![{title}](data:image/{img_format};base64,{b64_image})")
             parts.append(f"\n*{chart_type.replace('_', ' ').title()} chart — {len(rows)} data points*")
 
-            # Add insight annotation if available
             annotations = plan.get("annotations", [])
             if annotations:
                 parts.append(f"\n> {annotations[0]}")
 
-            # Echo back data_json so follow-up chart modifications have data available
-            data_json_obj = {"columns": columns, "rows": rows}
-            parts.append(f"\n<!-- data_json:{json.dumps(data_json_obj)} -->")
+            parts.append(data_comment)
 
-            self.status = f"{chart_type} | {len(rows)} rows"
+            self.status = f"{chart_type} | {len(rows)} rows | image"
             return Message(text="\n".join(parts))
 
         except Exception as e:
@@ -633,6 +751,71 @@ class CodeEditorNode(Node):
             return plan
         except Exception:
             return fallback
+
+    def _auto_plan_chart(self, columns, rows, user_request=""):
+        """Smart heuristic chart planning — no LLM needed. Instant.
+
+        Detects the best chart type from data shape and user keywords.
+        """
+        num_rows = len(rows)
+        num_cols = len(columns)
+        req_lower = user_request.lower()
+
+        # Detect column types
+        text_cols = []
+        numeric_cols = []
+        for i, col in enumerate(columns):
+            is_numeric = False
+            for row in rows[:10]:
+                if i < len(row) and row[i] is not None:
+                    is_numeric = isinstance(row[i], (int, float))
+                    break
+            if is_numeric:
+                numeric_cols.append(i)
+            else:
+                text_cols.append(i)
+
+        # Default axes: first text column = x, first numeric column = y
+        x_col = text_cols[0] if text_cols else 0
+        y_cols = numeric_cols if numeric_cols else [1] if num_cols > 1 else [0]
+
+        # Detect chart type from user keywords
+        chart_type = "bar"  # default
+        if any(w in req_lower for w in ("pie", "donut", "proportion", "share")):
+            chart_type = "pie" if num_rows <= 10 else "bar"
+        elif any(w in req_lower for w in ("line", "trend", "over time", "evolution", "progression")):
+            chart_type = "line"
+        elif any(w in req_lower for w in ("scatter", "correlation", "vs")):
+            chart_type = "scatter"
+        elif any(w in req_lower for w in ("horizontal", "bar_horizontal")):
+            chart_type = "bar_horizontal"
+        elif any(w in req_lower for w in ("stacked", "composition", "breakdown")):
+            chart_type = "stacked_bar"
+        elif num_rows > 12:
+            chart_type = "bar_horizontal"  # too many items for vertical bars
+
+        # Generate a clean title
+        if num_cols == 2:
+            title = f"{columns[numeric_cols[0]] if numeric_cols else columns[1]} by {columns[text_cols[0]] if text_cols else columns[0]}"
+        else:
+            title = "Data Visualization"
+
+        # Clean up title (remove underscores, add spaces)
+        title = title.replace("_", " ").title()
+
+        return {
+            "chart_type": chart_type,
+            "title": title,
+            "x_column": x_col,
+            "y_columns": y_cols,
+            "x_label": columns[x_col].replace("_", " ").title() if x_col < len(columns) else "",
+            "y_label": columns[y_cols[0]].replace("_", " ").title() if y_cols and y_cols[0] < len(columns) else "",
+            "sort_by_value": chart_type in ("bar", "bar_horizontal"),
+            "sort_descending": True,
+            "top_n": None,
+            "group_others": False,
+            "annotations": [],
+        }
 
     def _validate_and_fix_plan(self, plan, columns, rows):
         """Auto-fix common LLM mistakes in chart plans.
