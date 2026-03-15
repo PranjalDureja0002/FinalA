@@ -230,13 +230,8 @@ def _chart_to_base64(fig):
 
 
 def _chart_to_base64_optimized(fig):
-    """Ultra-compact base64 — tiny JPEG for fast LLM streaming.
-
-    Target: ~5-10KB base64 (~7-13K chars) for near-instant streaming.
-    At 100 tokens/sec, 10K chars streams in ~5 seconds.
-    """
+    """Compact base64 fallback — JPEG for fast streaming."""
     import matplotlib.pyplot as plt
-    # Shrink figure to reduce pixel count
     fig.set_size_inches(6, 3.5)
     plt.tight_layout()
     buf = io.BytesIO()
@@ -249,6 +244,51 @@ def _chart_to_base64_optimized(fig):
     buf.close()
     plt.close(fig)
     return b64, "jpeg"
+
+
+def _chart_to_url(fig):
+    """Save chart to server storage and return a URL. No base64, instant.
+
+    Uses AgentCore's storage service to save the image, then returns
+    a URL served by /api/files/images/ endpoint (no auth required).
+    """
+    import matplotlib.pyplot as plt
+    fig.set_size_inches(8, 5)
+    plt.tight_layout()
+
+    # Render to bytes
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=100, bbox_inches="tight",
+                facecolor=fig.get_facecolor(), pad_inches=0.15)
+    buf.seek(0)
+    image_bytes = buf.read()
+    buf.close()
+    plt.close(fig)
+
+    # Save via storage service
+    filename = f"chart_{int(time.time() * 1000)}.png"
+    folder = "charts"  # fixed folder for chart images
+
+    try:
+        from agentcore.services.deps import get_storage_service
+        storage = get_storage_service()
+        # Storage save_file is async — run it from sync context
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+            import concurrent.futures
+            future = asyncio.run_coroutine_threadsafe(
+                storage.save_file(agent_id=folder, file_name=filename, data=image_bytes),
+                loop,
+            )
+            future.result(timeout=10)
+        except RuntimeError:
+            asyncio.run(storage.save_file(agent_id=folder, file_name=filename, data=image_bytes))
+
+        # Return URL that the frontend can fetch directly
+        return f"/api/files/images/{folder}/{filename}", filename
+    except Exception:
+        return None, None
 
 
 def _render_chart_fig(plan, columns, rows, style_name):
@@ -663,13 +703,24 @@ class CodeEditorNode(Node):
                     return Message(text=text_chart + data_comment)
                 return self._render_as_table(columns, rows, plan.get("title", "Data"))
 
-            # ── Image mode: matplotlib → base64 JPEG ──
+            # ── Image mode: try URL (instant) → fallback to base64 (slower) ──
             fig = _render_chart_fig(plan, columns, rows, self.chart_style)
-            b64_image, img_format = _chart_to_base64_optimized(fig)
-
             title = plan.get("title", "Chart")
+
+            # Try saving to server storage → return URL (no base64 streaming)
+            chart_url, _ = _chart_to_url(fig)
+
             parts = []
-            parts.append(f"![{title}](data:image/{img_format};base64,{b64_image})")
+            if chart_url:
+                parts.append(f"![{title}]({chart_url})")
+                self.status = f"{chart_type} | {len(rows)} rows | url"
+            else:
+                # Fallback: base64 (if storage service unavailable)
+                fig2 = _render_chart_fig(plan, columns, rows, self.chart_style)
+                b64_image, img_format = _chart_to_base64_optimized(fig2)
+                parts.append(f"![{title}](data:image/{img_format};base64,{b64_image})")
+                self.status = f"{chart_type} | {len(rows)} rows | base64"
+
             parts.append(f"\n*{chart_type.replace('_', ' ').title()} chart — {len(rows)} data points*")
 
             annotations = plan.get("annotations", [])
@@ -678,7 +729,6 @@ class CodeEditorNode(Node):
 
             parts.append(data_comment)
 
-            self.status = f"{chart_type} | {len(rows)} rows | image"
             return Message(text="\n".join(parts))
 
         except Exception as e:
