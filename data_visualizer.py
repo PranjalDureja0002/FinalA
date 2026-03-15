@@ -230,20 +230,22 @@ def _chart_to_base64(fig):
 
 
 def _chart_to_base64_optimized(fig):
-    """Aggressively optimized base64 — JPEG, low DPI, small output.
+    """Ultra-compact base64 — tiny JPEG for fast LLM streaming.
 
-    Target: ~10-20KB base64 (vs ~100-150KB original PNG).
-    JPEG is ~5x smaller than PNG for charts with solid colors.
+    Target: ~5-10KB base64 (~7-13K chars) for near-instant streaming.
+    At 100 tokens/sec, 10K chars streams in ~5 seconds.
     """
     import matplotlib.pyplot as plt
+    # Shrink figure to reduce pixel count
+    fig.set_size_inches(6, 3.5)
     plt.tight_layout()
     buf = io.BytesIO()
-    # Use JPEG for much smaller file size (charts don't need PNG transparency)
-    fig.savefig(buf, format="jpg", dpi=80, bbox_inches="tight",
-                facecolor=fig.get_facecolor(), pad_inches=0.15,
-                pil_kwargs={"quality": 85, "optimize": True})
+    fig.savefig(buf, format="jpg", dpi=72, bbox_inches="tight",
+                facecolor=fig.get_facecolor(), pad_inches=0.1,
+                pil_kwargs={"quality": 70, "optimize": True})
     buf.seek(0)
-    b64 = base64.b64encode(buf.read()).decode("utf-8")
+    raw = buf.read()
+    b64 = base64.b64encode(raw).decode("utf-8")
     buf.close()
     plt.close(fig)
     return b64, "jpeg"
@@ -305,9 +307,9 @@ def _render_chart_fig(plan, columns, rows, style_name):
     # Extract labels and values
     labels = [str(r[x_col])[:30] if x_col < len(r) else "?" for r in work_rows]
 
-    # Create figure
-    fig_width = max(10, min(16, len(labels) * 0.8))
-    fig_height = 6 if chart_type != "bar_horizontal" else max(6, len(labels) * 0.4)
+    # Create figure (compact for fast base64 streaming)
+    fig_width = max(7, min(10, len(labels) * 0.7))
+    fig_height = 4 if chart_type != "bar_horizontal" else max(4, len(labels) * 0.35)
     fig, ax = plt.subplots(figsize=(fig_width, fig_height))
     fig.patch.set_facecolor(style["bg_color"])
     ax.set_facecolor(style["bg_color"])
@@ -653,10 +655,8 @@ class CodeEditorNode(Node):
             data_json_obj = {"columns": columns, "rows": rows}
             data_comment = f"\n<!-- data_json:{json.dumps(data_json_obj)} -->"
 
-            # ── Text mode: instant Unicode chart (only for bar types, no explicit image keywords) ──
-            req_lower = instructions.lower() if isinstance(instructions, str) else ""
-            wants_image = any(w in req_lower for w in ("vertical bar", "image", "png", "matplotlib", "pretty"))
-            if self.render_mode == "text" and chart_type in ("bar", "bar_horizontal") and not wants_image:
+            # ── Text mode: instant Unicode chart (only for horizontal bar) ──
+            if self.render_mode == "text" and chart_type == "bar_horizontal":
                 text_chart = _render_text_chart(plan, columns, rows)
                 if text_chart:
                     self.status = f"{chart_type} | {len(rows)} rows | text"
