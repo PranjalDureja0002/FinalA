@@ -653,13 +653,14 @@ class CodeEditorNode(Node):
             data_json_obj = {"columns": columns, "rows": rows}
             data_comment = f"\n<!-- data_json:{json.dumps(data_json_obj)} -->"
 
-            # ── Text mode: instant Unicode chart (default) ──
-            if self.render_mode == "text":
+            # ── Text mode: instant Unicode chart (only for bar types, no explicit image keywords) ──
+            req_lower = instructions.lower() if isinstance(instructions, str) else ""
+            wants_image = any(w in req_lower for w in ("vertical bar", "image", "png", "matplotlib", "pretty"))
+            if self.render_mode == "text" and chart_type in ("bar", "bar_horizontal") and not wants_image:
                 text_chart = _render_text_chart(plan, columns, rows)
                 if text_chart:
                     self.status = f"{chart_type} | {len(rows)} rows | text"
                     return Message(text=text_chart + data_comment)
-                # Fallback to table if text chart fails
                 return self._render_as_table(columns, rows, plan.get("title", "Data"))
 
             # ── Image mode: matplotlib → base64 JPEG ──
