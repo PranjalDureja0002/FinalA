@@ -1,0 +1,1194 @@
+# Few-shot SQL examples for NL2SQL
+# All examples follow these rules:
+#   - EUR conversion: ROUND(AMOUNT / EXCH_RATE, 2) always
+#   - Text matching: UPPER(col) LIKE UPPER('%val%')
+#   - Mandatory filter: INVOICE_DATE > DATE '2024-04-01'
+#   - Fiscal year: April 1 to March 31 (concrete dates, NEVER SYSDATE)
+#   - Oracle: FETCH FIRST N ROWS ONLY (never LIMIT)
+#   - Date ranges: INVOICE_DATE BETWEEN DATE 'x' AND DATE 'y' (never EXTRACT alone)
+#   - Dedup not shown here (applied automatically by pipeline)
+metadata:
+  version: "2.0"
+  count: 76
+examples:
+  - id: "ex001"
+    question: "What is the total spend?"
+    sql: |
+      SELECT SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+    intent: aggregation
+    entities: []
+    tags: ["aggregation", "spend"]
+    difficulty: easy
+
+  - id: "ex002"
+    question: "How much did we spend in 2024?"
+    sql: |
+      SELECT SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2024-01-01'
+        AND INVOICE_DATE <= DATE '2024-12-31'
+    intent: aggregation_filtered
+    entities: ["year"]
+    tags: ["aggregation", "spend", "year"]
+    difficulty: easy
+
+  - id: "ex003"
+    question: "Total spend by supplier"
+    sql: |
+      SELECT SUPPLIER_NAME, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY SUPPLIER_NAME
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: aggregation_grouped
+    entities: ["supplier"]
+    tags: ["aggregation", "spend", "supplier"]
+    difficulty: easy
+
+  - id: "ex004"
+    question: "Spend by region in current fiscal year"
+    sql: |
+      SELECT REGION, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2025-04-01'
+        AND INVOICE_DATE <= DATE '2026-03-31'
+      GROUP BY REGION
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: aggregation_grouped_filtered
+    entities: ["region", "year"]
+    tags: ["aggregation", "spend", "region", "fiscal_year"]
+    difficulty: easy
+
+  - id: "ex005"
+    question: "What is the total expenditure by commodity category?"
+    sql: |
+      SELECT COMMODITY_DESCRIPTION, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY COMMODITY_DESCRIPTION
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: aggregation_grouped
+    entities: ["commodity"]
+    tags: ["aggregation", "spend", "commodity"]
+    difficulty: easy
+
+  - id: "ex006"
+    question: "Top 10 suppliers by spend"
+    sql: |
+      SELECT SUPPLIER_NAME, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY SUPPLIER_NAME
+      ORDER BY TOTAL_SPEND_EUR DESC
+      FETCH FIRST 10 ROWS ONLY
+    intent: top_n
+    entities: ["supplier"]
+    tags: ["top_n", "spend", "supplier"]
+    difficulty: medium
+
+  - id: "ex007"
+    question: "Top 5 suppliers by spend in current fiscal year"
+    sql: |
+      SELECT SUPPLIER_NAME, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2025-04-01'
+        AND INVOICE_DATE <= DATE '2026-03-31'
+      GROUP BY SUPPLIER_NAME
+      ORDER BY TOTAL_SPEND_EUR DESC
+      FETCH FIRST 5 ROWS ONLY
+    intent: top_n_filtered
+    entities: ["supplier", "year"]
+    tags: ["top_n", "spend", "supplier", "fiscal_year"]
+    difficulty: medium
+
+  - id: "ex008"
+    question: "What are the top 10 commodities by expenditure?"
+    sql: |
+      SELECT COMMODITY_DESCRIPTION, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY COMMODITY_DESCRIPTION
+      ORDER BY TOTAL_SPEND_EUR DESC
+      FETCH FIRST 10 ROWS ONLY
+    intent: top_n
+    entities: ["commodity"]
+    tags: ["top_n", "spend", "commodity"]
+    difficulty: medium
+
+  - id: "ex009"
+    question: "How many suppliers do we have?"
+    sql: |
+      SELECT COUNT(DISTINCT SUPPLIER_NO) AS SUPPLIER_COUNT
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+    intent: count_distinct
+    entities: ["supplier"]
+    tags: ["count", "supplier"]
+    difficulty: easy
+
+  - id: "ex010"
+    question: "Number of suppliers by region"
+    sql: |
+      SELECT REGION, COUNT(DISTINCT SUPPLIER_NO) AS SUPPLIER_COUNT
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY REGION
+      ORDER BY SUPPLIER_COUNT DESC
+    intent: count_grouped
+    entities: ["region", "supplier"]
+    tags: ["count", "supplier", "region"]
+    difficulty: medium
+
+  - id: "ex011"
+    question: "How many invoices per plant in current fiscal year?"
+    sql: |
+      SELECT PLANT_NAME, COUNT(DISTINCT INVOICE_NO) AS INVOICE_COUNT
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2025-04-01'
+        AND INVOICE_DATE <= DATE '2026-03-31'
+      GROUP BY PLANT_NAME
+      ORDER BY INVOICE_COUNT DESC
+    intent: count_grouped_filtered
+    entities: ["plant", "year"]
+    tags: ["count", "invoice", "plant", "fiscal_year"]
+    difficulty: medium
+
+  - id: "ex012"
+    question: "Spend trend by fiscal year"
+    sql: |
+      SELECT G_JAHR AS FISCAL_YEAR, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY G_JAHR
+      ORDER BY G_JAHR
+    intent: trend
+    entities: ["year"]
+    tags: ["trend", "spend", "fiscal_year"]
+    difficulty: medium
+
+  - id: "ex013"
+    question: "Compare FY2024 vs FY2025 spend by region"
+    sql: |
+      SELECT REGION,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2024-04-01' AND INVOICE_DATE <= DATE '2025-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS FY2024_SPEND_EUR,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS FY2025_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2024-04-01'
+      GROUP BY REGION
+      ORDER BY REGION
+    intent: comparison
+    entities: ["region", "year"]
+    tags: ["comparison", "spend", "region", "fiscal_year"]
+    difficulty: hard
+
+  - id: "ex014"
+    question: "Total spend by supplier and commodity"
+    sql: |
+      SELECT SUPPLIER_NAME, COMMODITY_DESCRIPTION, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY SUPPLIER_NAME, COMMODITY_DESCRIPTION
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: multi_dimension
+    entities: ["supplier", "commodity"]
+    tags: ["aggregation", "spend", "supplier", "commodity"]
+    difficulty: medium
+
+  - id: "ex015"
+    question: "Top 10 supplier-plant combinations by spend in current fiscal year"
+    sql: |
+      SELECT SUPPLIER_NAME, PLANT_NAME, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2025-04-01'
+        AND INVOICE_DATE <= DATE '2026-03-31'
+      GROUP BY SUPPLIER_NAME, PLANT_NAME
+      ORDER BY TOTAL_SPEND_EUR DESC
+      FETCH FIRST 10 ROWS ONLY
+    intent: multi_dimension_top_n
+    entities: ["supplier", "plant", "year"]
+    tags: ["top_n", "spend", "supplier", "plant", "fiscal_year"]
+    difficulty: hard
+
+  - id: "ex016"
+    question: "Spend from Iberica region"
+    sql: |
+      SELECT SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE REGION = 'Iberica'
+        AND INVOICE_DATE > DATE '2024-04-01'
+    intent: filtered_aggregation
+    entities: ["region"]
+    tags: ["aggregation", "spend", "region", "filter"]
+    difficulty: easy
+
+  - id: "ex017"
+    question: "Top 5 suppliers in North America region"
+    sql: |
+      SELECT SUPPLIER_NAME, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE REGION = 'North America'
+        AND INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY SUPPLIER_NAME
+      ORDER BY TOTAL_SPEND_EUR DESC
+      FETCH FIRST 5 ROWS ONLY
+    intent: top_n_filtered
+    entities: ["region", "supplier"]
+    tags: ["top_n", "spend", "supplier", "region"]
+    difficulty: medium
+
+  - id: "ex018"
+    question: "Average transaction amount by supplier"
+    sql: |
+      SELECT SUPPLIER_NAME, ROUND(AVG(AMOUNT / EXCH_RATE), 2) AS AVG_AMOUNT_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY SUPPLIER_NAME
+      ORDER BY AVG_AMOUNT_EUR DESC
+    intent: average_grouped
+    entities: ["supplier"]
+    tags: ["average", "spend", "supplier"]
+    difficulty: medium
+
+  - id: "ex019"
+    question: "What is the spend on supplier Eissmann in the Meerane plant in current fiscal year?"
+    sql: |
+      SELECT SUPPLIER_NAME, PLANT_NAME, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE UPPER(SUPPLIER_NAME) LIKE UPPER('%Eissmann%')
+        AND UPPER(PLANT_NAME) LIKE UPPER('%Meerane%')
+        AND INVOICE_DATE >= DATE '2025-04-01'
+        AND INVOICE_DATE <= DATE '2026-03-31'
+      GROUP BY SUPPLIER_NAME, PLANT_NAME
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: filtered_aggregation
+    entities: ["supplier", "plant", "year"]
+    tags: ["aggregation", "spend", "supplier", "plant", "fiscal_year", "text_filter"]
+    difficulty: medium
+
+  - id: "ex020"
+    question: "Spend by vehicle type"
+    sql: |
+      SELECT FAHRZEUGTYP, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE FAHRZEUGTYP IS NOT NULL
+        AND INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY FAHRZEUGTYP
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: aggregation_grouped
+    entities: ["vehicle_type"]
+    tags: ["aggregation", "spend", "vehicle"]
+    difficulty: medium
+
+  - id: "ex021"
+    question: "Show spend trend over last 4 fiscal years"
+    sql: |
+      SELECT G_JAHR AS FISCAL_YEAR, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2022-04-01'
+      GROUP BY G_JAHR
+      ORDER BY G_JAHR DESC
+      FETCH FIRST 4 ROWS ONLY
+    intent: time_series
+    entities: ["year"]
+    tags: ["trend", "spend", "fiscal_year"]
+    difficulty: medium
+
+  - id: "ex022"
+    question: "Compare current vs last fiscal year spend by supplier"
+    sql: |
+      SELECT SUPPLIER_NAME,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2024-04-01' AND INVOICE_DATE <= DATE '2025-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS PREV_FY_EUR,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS CURR_FY_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2024-04-01'
+      GROUP BY SUPPLIER_NAME
+      ORDER BY CURR_FY_EUR DESC
+    intent: comparison
+    entities: ["supplier", "year"]
+    tags: ["comparison", "spend", "supplier", "fiscal_year"]
+    difficulty: hard
+
+  - id: "ex023"
+    question: "Monthly spend breakdown for fiscal year 2025"
+    sql: |
+      SELECT TO_CHAR(INVOICE_DATE, 'YYYY-MM') AS MONTH,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2025-04-01'
+        AND INVOICE_DATE <= DATE '2026-03-31'
+      GROUP BY TO_CHAR(INVOICE_DATE, 'YYYY-MM')
+      ORDER BY MONTH
+    intent: time_series
+    entities: ["year", "month"]
+    tags: ["time_series", "spend", "month", "fiscal_year"]
+    difficulty: medium
+
+  - id: "ex024"
+    question: "Average spend per supplier per region"
+    sql: |
+      SELECT SUPPLIER_NAME, REGION, ROUND(AVG(AMOUNT / EXCH_RATE), 2) AS AVG_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY SUPPLIER_NAME, REGION
+      ORDER BY AVG_SPEND_EUR DESC
+    intent: aggregation_grouped
+    entities: ["supplier", "region"]
+    tags: ["average", "spend", "supplier", "region"]
+    difficulty: medium
+
+  - id: "ex025"
+    question: "Top 3 suppliers by spend in each plant"
+    sql: |
+      SELECT PLANT_NAME, SUPPLIER_NAME, TOTAL_SPEND_EUR
+      FROM (
+        SELECT PLANT_NAME, SUPPLIER_NAME,
+          SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR,
+          ROW_NUMBER() OVER (PARTITION BY PLANT_NAME ORDER BY SUM(ROUND(AMOUNT / EXCH_RATE, 2)) DESC) AS rn
+        FROM VW_SPEND_REPORT_VIEW
+        WHERE INVOICE_DATE > DATE '2024-04-01'
+        GROUP BY PLANT_NAME, SUPPLIER_NAME
+      )
+      WHERE rn <= 3
+      ORDER BY PLANT_NAME, rn
+    intent: top_n_by_partition
+    entities: ["plant", "supplier"]
+    tags: ["top_n", "spend", "supplier", "plant", "window"]
+    difficulty: hard
+
+  - id: "ex026"
+    question: "Spend variance by commodity category"
+    sql: |
+      SELECT COMMODITY_DESCRIPTION,
+        MIN(ROUND(AMOUNT / EXCH_RATE, 2)) AS MIN_SPEND_EUR,
+        MAX(ROUND(AMOUNT / EXCH_RATE, 2)) AS MAX_SPEND_EUR,
+        ROUND(AVG(AMOUNT / EXCH_RATE), 2) AS AVG_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY COMMODITY_DESCRIPTION
+      ORDER BY AVG_SPEND_EUR DESC
+    intent: aggregation_grouped
+    entities: ["commodity"]
+    tags: ["aggregation", "spend", "commodity", "statistics"]
+    difficulty: hard
+
+  - id: "ex027"
+    question: "Suppliers in Germany and Eastern Europe region with spend above 1 million in current fiscal year"
+    sql: |
+      SELECT SUPPLIER_NAME, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE REGION = 'Germany and Eastern Europe'
+        AND INVOICE_DATE >= DATE '2025-04-01'
+        AND INVOICE_DATE <= DATE '2026-03-31'
+      GROUP BY SUPPLIER_NAME
+      HAVING SUM(ROUND(AMOUNT / EXCH_RATE, 2)) > 1000000
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: filtered_aggregation
+    entities: ["region", "supplier", "year"]
+    tags: ["aggregation", "spend", "supplier", "region", "having", "fiscal_year"]
+    difficulty: hard
+
+  - id: "ex028"
+    question: "Plants with more than 50 suppliers"
+    sql: |
+      SELECT PLANT_NAME, COUNT(DISTINCT SUPPLIER_NO) AS SUPPLIER_COUNT
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY PLANT_NAME
+      HAVING COUNT(DISTINCT SUPPLIER_NO) > 50
+      ORDER BY SUPPLIER_COUNT DESC
+    intent: filtered_aggregation
+    entities: ["plant", "supplier"]
+    tags: ["count", "supplier", "plant", "having"]
+    difficulty: hard
+
+  - id: "ex029"
+    question: "Commodities with year over year growth above 10 percent"
+    sql: |
+      SELECT COMMODITY_DESCRIPTION,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2024-04-01' AND INVOICE_DATE <= DATE '2025-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS FY2024_EUR,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS FY2025_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2024-04-01'
+      GROUP BY COMMODITY_DESCRIPTION
+      HAVING SUM(CASE WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) >
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2024-04-01' AND INVOICE_DATE <= DATE '2025-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) * 1.1
+      ORDER BY FY2025_EUR DESC
+    intent: comparison
+    entities: ["commodity", "year"]
+    tags: ["comparison", "spend", "commodity", "fiscal_year", "growth"]
+    difficulty: hard
+
+  - id: "ex030"
+    question: "How many unique suppliers do we have per region"
+    sql: |
+      SELECT REGION, COUNT(DISTINCT SUPPLIER_NO) AS UNIQUE_SUPPLIERS
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY REGION
+      ORDER BY UNIQUE_SUPPLIERS DESC
+    intent: count_grouped
+    entities: ["region", "supplier"]
+    tags: ["count", "supplier", "region"]
+    difficulty: medium
+
+  - id: "ex031"
+    question: "Count of transactions by month in current fiscal year"
+    sql: |
+      SELECT TO_CHAR(INVOICE_DATE, 'YYYY-MM') AS MONTH, COUNT(*) AS TRANSACTION_COUNT
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2025-04-01'
+        AND INVOICE_DATE <= DATE '2026-03-31'
+      GROUP BY TO_CHAR(INVOICE_DATE, 'YYYY-MM')
+      ORDER BY MONTH
+    intent: count_grouped
+    entities: ["month"]
+    tags: ["count", "transaction", "month", "fiscal_year"]
+    difficulty: medium
+
+  - id: "ex032"
+    question: "Number of commodities per supplier"
+    sql: |
+      SELECT SUPPLIER_NAME, COUNT(DISTINCT COMMODITY) AS COMMODITY_COUNT
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY SUPPLIER_NAME
+      ORDER BY COMMODITY_COUNT DESC
+    intent: count_grouped
+    entities: ["supplier", "commodity"]
+    tags: ["count", "commodity", "supplier"]
+    difficulty: medium
+
+  - id: "ex033"
+    question: "Suppliers with spend above average"
+    sql: |
+      SELECT SUPPLIER_NAME, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY SUPPLIER_NAME
+      HAVING SUM(ROUND(AMOUNT / EXCH_RATE, 2)) > (
+        SELECT AVG(s) FROM (
+          SELECT SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS s
+          FROM VW_SPEND_REPORT_VIEW
+          WHERE INVOICE_DATE > DATE '2024-04-01'
+          GROUP BY SUPPLIER_NAME
+        )
+      )
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: comparison
+    entities: ["supplier"]
+    tags: ["comparison", "spend", "supplier", "having"]
+    difficulty: hard
+
+  - id: "ex034"
+    question: "Plants ranked by supplier count"
+    sql: |
+      SELECT PLANT_NAME, COUNT(DISTINCT SUPPLIER_NO) AS SUPPLIER_COUNT
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY PLANT_NAME
+      ORDER BY SUPPLIER_COUNT DESC
+    intent: comparison
+    entities: ["plant", "supplier"]
+    tags: ["count", "supplier", "plant", "ranking"]
+    difficulty: medium
+
+  - id: "ex035"
+    question: "Top performing regions by spend efficiency"
+    sql: |
+      SELECT REGION,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR,
+        COUNT(DISTINCT SUPPLIER_NO) AS SUPPLIER_COUNT,
+        ROUND(SUM(AMOUNT / EXCH_RATE) / NULLIF(COUNT(DISTINCT SUPPLIER_NO), 0), 2) AS SPEND_PER_SUPPLIER_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY REGION
+      ORDER BY SPEND_PER_SUPPLIER_EUR DESC
+    intent: comparison
+    entities: ["region", "supplier"]
+    tags: ["comparison", "spend", "region", "efficiency"]
+    difficulty: hard
+
+  - id: "ex036"
+    question: "Minimum spend transaction per commodity"
+    sql: |
+      SELECT COMMODITY_DESCRIPTION, MIN(ROUND(AMOUNT / EXCH_RATE, 2)) AS MIN_AMOUNT_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY COMMODITY_DESCRIPTION
+      ORDER BY MIN_AMOUNT_EUR
+    intent: aggregation_grouped
+    entities: ["commodity"]
+    tags: ["aggregation", "spend", "commodity", "min"]
+    difficulty: easy
+
+  - id: "ex037"
+    question: "Maximum single transaction by region"
+    sql: |
+      SELECT REGION, MAX(ROUND(AMOUNT / EXCH_RATE, 2)) AS MAX_TRANSACTION_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY REGION
+      ORDER BY MAX_TRANSACTION_EUR DESC
+    intent: aggregation_grouped
+    entities: ["region"]
+    tags: ["aggregation", "spend", "region", "max"]
+    difficulty: easy
+
+  - id: "ex038"
+    question: "Suppliers with only one commodity"
+    sql: |
+      SELECT SUPPLIER_NAME, COUNT(DISTINCT COMMODITY) AS COMMODITY_COUNT
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY SUPPLIER_NAME
+      HAVING COUNT(DISTINCT COMMODITY) = 1
+      ORDER BY SUPPLIER_NAME
+    intent: filtered_aggregation
+    entities: ["supplier", "commodity"]
+    tags: ["count", "supplier", "commodity", "having"]
+    difficulty: medium
+
+  - id: "ex039"
+    question: "Which commodity generated the highest spend in region Iberica in month of June?"
+    sql: |
+      SELECT COMMODITY_DESCRIPTION, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE REGION = 'Iberica'
+        AND INVOICE_DATE >= DATE '2025-06-01'
+        AND INVOICE_DATE <= DATE '2025-06-30'
+      GROUP BY COMMODITY_DESCRIPTION
+      ORDER BY TOTAL_SPEND_EUR DESC
+      FETCH FIRST 1 ROWS ONLY
+    intent: top_n_filtered
+    entities: ["commodity", "region", "month"]
+    tags: ["top_n", "spend", "commodity", "region", "month", "text_filter"]
+    difficulty: medium
+
+  - id: "ex040"
+    question: "Regions ranked by total transaction count"
+    sql: |
+      SELECT REGION,
+        COUNT(*) AS TRANSACTION_COUNT,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY REGION
+      ORDER BY TRANSACTION_COUNT DESC
+    intent: aggregation_grouped
+    entities: ["region"]
+    tags: ["count", "transaction", "region", "ranking"]
+    difficulty: medium
+
+  - id: "ex041"
+    question: "Top 3 suppliers by spend in each region"
+    sql: |
+      SELECT REGION, SUPPLIER_NAME, TOTAL_SPEND_EUR
+      FROM (
+        SELECT REGION, SUPPLIER_NAME,
+          SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR,
+          ROW_NUMBER() OVER (PARTITION BY REGION ORDER BY SUM(ROUND(AMOUNT / EXCH_RATE, 2)) DESC) AS rn
+        FROM VW_SPEND_REPORT_VIEW
+        WHERE INVOICE_DATE > DATE '2024-04-01'
+        GROUP BY REGION, SUPPLIER_NAME
+      )
+      WHERE rn <= 3
+      ORDER BY REGION, rn
+    intent: top_n_by_partition
+    entities: ["region", "supplier"]
+    tags: ["top_n", "spend", "supplier", "region", "window"]
+    difficulty: hard
+
+  - id: "ex042"
+    question: "Which suppliers account for top 80 percent of spend?"
+    sql: |
+      WITH supplier_spend AS (
+        SELECT SUPPLIER_NAME, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS total_spend_eur
+        FROM VW_SPEND_REPORT_VIEW
+        WHERE INVOICE_DATE > DATE '2024-04-01'
+        GROUP BY SUPPLIER_NAME
+      ),
+      supplier_ranked AS (
+        SELECT SUPPLIER_NAME, total_spend_eur,
+          PERCENT_RANK() OVER (ORDER BY total_spend_eur DESC) AS percentile
+        FROM supplier_spend
+      )
+      SELECT SUPPLIER_NAME, total_spend_eur
+      FROM supplier_ranked
+      WHERE percentile <= 0.20
+      ORDER BY total_spend_eur DESC
+    intent: threshold_cumulative
+    entities: ["supplier"]
+    tags: ["top_n", "spend", "supplier", "percentile", "window"]
+    difficulty: hard
+
+  - id: "ex043"
+    question: "What is the tail spend (bottom 10 percent of suppliers)?"
+    sql: |
+      WITH supplier_spend AS (
+        SELECT SUPPLIER_NAME, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS total_spend_eur
+        FROM VW_SPEND_REPORT_VIEW
+        WHERE INVOICE_DATE > DATE '2024-04-01'
+        GROUP BY SUPPLIER_NAME
+      ),
+      supplier_ranked AS (
+        SELECT SUPPLIER_NAME, total_spend_eur,
+          PERCENT_RANK() OVER (ORDER BY total_spend_eur) AS pct_rank
+        FROM supplier_spend
+      )
+      SELECT SUPPLIER_NAME, total_spend_eur
+      FROM supplier_ranked
+      WHERE pct_rank <= 0.10
+      ORDER BY total_spend_eur ASC
+    intent: tail_spend
+    entities: ["supplier"]
+    tags: ["bottom_n", "spend", "supplier", "percentile", "window"]
+    difficulty: hard
+
+  - id: "ex044"
+    question: "Which materials are sourced from more than one region?"
+    sql: |
+      SELECT ARTICLE_NO, ARTICLE_DESCRIPTION,
+        COUNT(DISTINCT REGION) AS NUM_REGIONS,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY ARTICLE_NO, ARTICLE_DESCRIPTION
+      HAVING COUNT(DISTINCT REGION) > 1
+      ORDER BY NUM_REGIONS DESC, TOTAL_SPEND_EUR DESC
+    intent: multi_region_analysis
+    entities: ["article", "region"]
+    tags: ["count", "article", "region", "having"]
+    difficulty: hard
+
+  - id: "ex045"
+    question: "What percentage of total spend does each supplier contribute?"
+    sql: |
+      SELECT SUPPLIER_NAME,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR,
+        ROUND(RATIO_TO_REPORT(SUM(ROUND(AMOUNT / EXCH_RATE, 2))) OVER () * 100, 2) AS PCT_OF_TOTAL
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY SUPPLIER_NAME
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: contribution_percentage
+    entities: ["supplier"]
+    tags: ["aggregation", "spend", "supplier", "percentage", "window"]
+    difficulty: medium
+
+  - id: "ex046"
+    question: "Total spend by supplier classification (Motherson Group vs External)"
+    sql: |
+      SELECT CASE WHEN ABCINDICATOR = 'G' THEN 'Motherson Group' ELSE 'External' END AS SUPPLIER_TYPE,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR,
+        COUNT(DISTINCT SUPPLIER_NO) AS SUPPLIER_COUNT
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY CASE WHEN ABCINDICATOR = 'G' THEN 'Motherson Group' ELSE 'External' END
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: supplier_classification
+    entities: ["supplier"]
+    tags: ["aggregation", "spend", "classification"]
+    difficulty: medium
+
+  - id: "ex047"
+    question: "Motherson Group supplier spend"
+    sql: |
+      SELECT SUPPLIER_NAME, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE ABCINDICATOR = 'G'
+        AND INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY SUPPLIER_NAME
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: supplier_classification
+    entities: ["supplier"]
+    tags: ["aggregation", "spend", "supplier", "classification"]
+    difficulty: easy
+
+  - id: "ex048"
+    question: "Spend by material classification (OEM vs MPP)"
+    sql: |
+      SELECT CASE WHEN OEM IN ('J','Y') THEN 'OEM Nominated' ELSE 'MPP Nominated' END AS MATERIAL_TYPE,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR,
+        COUNT(DISTINCT ARTICLE_NO) AS ARTICLE_COUNT
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY CASE WHEN OEM IN ('J','Y') THEN 'OEM Nominated' ELSE 'MPP Nominated' END
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: material_classification
+    entities: ["article", "oem"]
+    tags: ["aggregation", "spend", "classification", "oem"]
+    difficulty: medium
+
+  - id: "ex049"
+    question: "Spend by incoterm responsibility"
+    sql: |
+      SELECT CASE
+          WHEN "Incoterms (Supplier Master)" IN ('EXW','FCA','FOB') THEN 'Buyer'
+          WHEN "Incoterms (Supplier Master)" IN ('DAP','DDP','DDU') THEN 'Supplier'
+          WHEN "Incoterms (Supplier Master)" IN ('CPT','CIP') THEN 'Shared'
+          ELSE 'Unknown'
+        END AS RESPONSIBILITY,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR,
+        COUNT(DISTINCT SUPPLIER_NO) AS SUPPLIER_COUNT
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY CASE
+          WHEN "Incoterms (Supplier Master)" IN ('EXW','FCA','FOB') THEN 'Buyer'
+          WHEN "Incoterms (Supplier Master)" IN ('DAP','DDP','DDU') THEN 'Supplier'
+          WHEN "Incoterms (Supplier Master)" IN ('CPT','CIP') THEN 'Shared'
+          ELSE 'Unknown'
+        END
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: incoterm_analysis
+    entities: ["supplier", "incoterm"]
+    tags: ["aggregation", "spend", "classification", "incoterm"]
+    difficulty: hard
+
+  - id: "ex050"
+    question: "Top 10 suppliers by spend with classification"
+    sql: |
+      SELECT SUPPLIER_NO, SUPPLIER_NAME,
+        CASE WHEN ABCINDICATOR = 'G' THEN 'Motherson Group' ELSE 'External' END AS SUPPLIER_TYPE,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY SUPPLIER_NO, SUPPLIER_NAME, ABCINDICATOR
+      ORDER BY TOTAL_SPEND_EUR DESC
+      FETCH FIRST 10 ROWS ONLY
+    intent: top_n
+    entities: ["supplier"]
+    tags: ["top_n", "spend", "supplier", "classification"]
+    difficulty: easy
+
+  - id: "ex051"
+    question: "List top 5 suppliers in plant Tuscaloosa in current fiscal year"
+    sql: |
+      SELECT SUPPLIER_NAME, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE UPPER(PLANT_NAME) LIKE UPPER('%Tuscaloosa%')
+        AND INVOICE_DATE >= DATE '2025-04-01'
+        AND INVOICE_DATE <= DATE '2026-03-31'
+      GROUP BY SUPPLIER_NAME
+      ORDER BY TOTAL_SPEND_EUR DESC
+      FETCH FIRST 5 ROWS ONLY
+    intent: top_n_filtered
+    entities: ["supplier", "plant", "year"]
+    tags: ["top_n", "spend", "supplier", "plant", "fiscal_year", "text_filter"]
+    difficulty: medium
+
+  - id: "ex052"
+    question: "Top 5 suppliers per region by total spend"
+    sql: |
+      SELECT REGION, SUPPLIER_NAME, TOTAL_SPEND_EUR
+      FROM (
+        SELECT REGION, SUPPLIER_NAME,
+          SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR,
+          ROW_NUMBER() OVER (PARTITION BY REGION ORDER BY SUM(ROUND(AMOUNT / EXCH_RATE, 2)) DESC) AS rn
+        FROM VW_SPEND_REPORT_VIEW
+        WHERE INVOICE_DATE > DATE '2024-04-01'
+        GROUP BY REGION, SUPPLIER_NAME
+      )
+      WHERE rn <= 5
+      ORDER BY REGION, rn
+    intent: top_n_by_partition
+    entities: ["region", "supplier"]
+    tags: ["top_n", "spend", "supplier", "region", "window"]
+    difficulty: hard
+
+  - id: "ex053"
+    question: "Which regions does supplier AKT PLASTICOS deliver to with spend in current fiscal year?"
+    sql: |
+      SELECT REGION, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE UPPER(SUPPLIER_NAME) LIKE UPPER('%AKT PLASTICOS%')
+        AND INVOICE_DATE >= DATE '2025-04-01'
+        AND INVOICE_DATE <= DATE '2026-03-31'
+      GROUP BY REGION
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: enumerate
+    entities: ["supplier", "region", "year"]
+    tags: ["enumerate", "region", "supplier", "fiscal_year", "text_filter"]
+    difficulty: medium
+
+  - id: "ex054"
+    question: "How many part numbers are in commodity E011? List total amount per region"
+    sql: |
+      SELECT REGION,
+        COUNT(DISTINCT ARTICLE_NO) AS PART_COUNT,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE UPPER(COMMODITY) LIKE UPPER('%E011%')
+        AND INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY REGION
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: count_grouped
+    entities: ["commodity", "article", "region"]
+    tags: ["count", "article", "commodity", "region", "text_filter"]
+    difficulty: medium
+
+  - id: "ex055"
+    question: "What is the payment terms with supplier Novem in Plant Tuscaloosa? Show result on supplier level including spend"
+    sql: |
+      SELECT SUPPLIER_NAME, PAYMENT_TERM, TERMS_OF_PAYMENT_DESCRIPTION,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE UPPER(SUPPLIER_NAME) LIKE UPPER('%Novem%')
+        AND UPPER(PLANT_NAME) LIKE UPPER('%Tuscaloosa%')
+        AND INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY SUPPLIER_NAME, PAYMENT_TERM, TERMS_OF_PAYMENT_DESCRIPTION
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: enumerate
+    entities: ["supplier", "plant", "payment"]
+    tags: ["enumerate", "supplier", "plant", "payment", "text_filter"]
+    difficulty: medium
+
+  - id: "ex056"
+    question: "What is the spend on supplier 3M in Tuscaloosa plant in current fiscal year?"
+    sql: |
+      SELECT SUPPLIER_NAME, PLANT_NAME, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE UPPER(SUPPLIER_NAME) LIKE UPPER('%3M%')
+        AND UPPER(PLANT_NAME) LIKE UPPER('%Tuscaloosa%')
+        AND INVOICE_DATE >= DATE '2025-04-01'
+        AND INVOICE_DATE <= DATE '2026-03-31'
+      GROUP BY SUPPLIER_NAME, PLANT_NAME
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: filtered_aggregation
+    entities: ["supplier", "plant", "year"]
+    tags: ["aggregation", "spend", "supplier", "plant", "fiscal_year", "text_filter"]
+    difficulty: medium
+
+  - id: "ex057"
+    question: "Compare current vs previous fiscal year spend"
+    sql: |
+      SELECT
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2024-04-01' AND INVOICE_DATE <= DATE '2025-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS PREV_FY_EUR,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS CURR_FY_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2024-04-01'
+    intent: comparison
+    entities: ["year"]
+    tags: ["comparison", "spend", "fiscal_year"]
+    difficulty: medium
+
+  - id: "ex058"
+    question: "Year over year growth by supplier"
+    sql: |
+      SELECT SUPPLIER_NAME,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2024-04-01' AND INVOICE_DATE <= DATE '2025-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS FY2024_EUR,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS FY2025_EUR,
+        ROUND((SUM(CASE WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) -
+          SUM(CASE WHEN INVOICE_DATE >= DATE '2024-04-01' AND INVOICE_DATE <= DATE '2025-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END)) /
+          NULLIF(SUM(CASE WHEN INVOICE_DATE >= DATE '2024-04-01' AND INVOICE_DATE <= DATE '2025-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END), 0) * 100, 2) AS YOY_GROWTH_PCT
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2024-04-01'
+      GROUP BY SUPPLIER_NAME
+      HAVING SUM(CASE WHEN INVOICE_DATE >= DATE '2024-04-01' AND INVOICE_DATE <= DATE '2025-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) > 0
+      ORDER BY YOY_GROWTH_PCT DESC
+    intent: comparison
+    entities: ["supplier", "year"]
+    tags: ["comparison", "spend", "supplier", "fiscal_year", "growth"]
+    difficulty: hard
+
+  - id: "ex059"
+    question: "Compare North America vs Iberica region spend"
+    sql: |
+      SELECT REGION, SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE REGION IN ('North America', 'Iberica')
+        AND INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY REGION
+      ORDER BY TOTAL_SPEND_EUR DESC
+    intent: comparison
+    entities: ["region"]
+    tags: ["comparison", "spend", "region"]
+    difficulty: medium
+
+  - id: "ex060"
+    question: "Supplier spend increase from FY2024 to FY2025"
+    sql: |
+      SELECT SUPPLIER_NAME,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2024-04-01' AND INVOICE_DATE <= DATE '2025-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS FY2024_EUR,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS FY2025_EUR,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) -
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2024-04-01' AND INVOICE_DATE <= DATE '2025-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS INCREASE_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2024-04-01'
+      GROUP BY SUPPLIER_NAME
+      HAVING SUM(CASE WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) >
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2024-04-01' AND INVOICE_DATE <= DATE '2025-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END)
+      ORDER BY INCREASE_EUR DESC
+    intent: comparison
+    entities: ["supplier", "year"]
+    tags: ["comparison", "spend", "supplier", "fiscal_year", "growth"]
+    difficulty: hard
+
+  - id: "ex061"
+    question: "Plant spending higher than previous fiscal year"
+    sql: |
+      SELECT PLANT_NAME,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2024-04-01' AND INVOICE_DATE <= DATE '2025-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS PREV_FY_EUR,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS CURR_FY_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2024-04-01'
+      GROUP BY PLANT_NAME
+      HAVING SUM(CASE WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) >
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2024-04-01' AND INVOICE_DATE <= DATE '2025-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END)
+      ORDER BY CURR_FY_EUR DESC
+    intent: comparison
+    entities: ["plant", "year"]
+    tags: ["comparison", "spend", "plant", "fiscal_year"]
+    difficulty: hard
+
+  - id: "ex062"
+    question: "Commodity spend decline from FY2024 to FY2025"
+    sql: |
+      SELECT COMMODITY_DESCRIPTION,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2024-04-01' AND INVOICE_DATE <= DATE '2025-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS FY2024_EUR,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS FY2025_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2024-04-01'
+      GROUP BY COMMODITY_DESCRIPTION
+      HAVING SUM(CASE WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) <
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2024-04-01' AND INVOICE_DATE <= DATE '2025-03-31' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END)
+      ORDER BY FY2024_EUR DESC
+    intent: comparison
+    entities: ["commodity", "year"]
+    tags: ["comparison", "spend", "commodity", "fiscal_year", "decline"]
+    difficulty: hard
+
+  - id: "ex063"
+    question: "Compare Q1 vs Q2 spending by region in current fiscal year"
+    sql: |
+      SELECT REGION,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2025-06-30' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS Q1_SPEND_EUR,
+        SUM(CASE WHEN INVOICE_DATE >= DATE '2025-07-01' AND INVOICE_DATE <= DATE '2025-09-30' THEN ROUND(AMOUNT / EXCH_RATE, 2) ELSE 0 END) AS Q2_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2025-04-01'
+        AND INVOICE_DATE <= DATE '2025-09-30'
+      GROUP BY REGION
+      ORDER BY REGION
+    intent: comparison
+    entities: ["region", "quarter"]
+    tags: ["comparison", "spend", "region", "quarter", "fiscal_year"]
+    difficulty: medium
+
+  - id: "ex064"
+    question: "Variance between supplier spend and average"
+    sql: |
+      SELECT SUPPLIER_NAME,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) - (
+          SELECT AVG(s) FROM (
+            SELECT SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS s
+            FROM VW_SPEND_REPORT_VIEW
+            WHERE INVOICE_DATE > DATE '2024-04-01'
+            GROUP BY SUPPLIER_NAME
+          )
+        ) AS VARIANCE_FROM_AVG_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY SUPPLIER_NAME
+      ORDER BY VARIANCE_FROM_AVG_EUR DESC
+    intent: comparison
+    entities: ["supplier"]
+    tags: ["comparison", "spend", "supplier", "variance"]
+    difficulty: hard
+
+  - id: "ex065"
+    question: "Monthly spend breakdown in current fiscal year"
+    sql: |
+      SELECT TO_CHAR(INVOICE_DATE, 'YYYY-MM') AS MONTH,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2025-04-01'
+        AND INVOICE_DATE <= DATE '2026-03-31'
+      GROUP BY TO_CHAR(INVOICE_DATE, 'YYYY-MM')
+      ORDER BY MONTH
+    intent: time_series
+    entities: ["year", "month"]
+    tags: ["time_series", "spend", "month", "fiscal_year"]
+    difficulty: medium
+
+  - id: "ex066"
+    question: "Quarterly spend pattern for current fiscal year"
+    sql: |
+      SELECT
+        CASE
+          WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2025-06-30' THEN 'Q1'
+          WHEN INVOICE_DATE >= DATE '2025-07-01' AND INVOICE_DATE <= DATE '2025-09-30' THEN 'Q2'
+          WHEN INVOICE_DATE >= DATE '2025-10-01' AND INVOICE_DATE <= DATE '2025-12-31' THEN 'Q3'
+          WHEN INVOICE_DATE >= DATE '2026-01-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN 'Q4'
+        END AS FISCAL_QUARTER,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2025-04-01'
+        AND INVOICE_DATE <= DATE '2026-03-31'
+      GROUP BY CASE
+          WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2025-06-30' THEN 'Q1'
+          WHEN INVOICE_DATE >= DATE '2025-07-01' AND INVOICE_DATE <= DATE '2025-09-30' THEN 'Q2'
+          WHEN INVOICE_DATE >= DATE '2025-10-01' AND INVOICE_DATE <= DATE '2025-12-31' THEN 'Q3'
+          WHEN INVOICE_DATE >= DATE '2026-01-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN 'Q4'
+        END
+      ORDER BY FISCAL_QUARTER
+    intent: time_series
+    entities: ["quarter", "year"]
+    tags: ["time_series", "spend", "quarter", "fiscal_year"]
+    difficulty: medium
+
+  - id: "ex067"
+    question: "Spend in the last 3 months"
+    sql: |
+      SELECT TO_CHAR(INVOICE_DATE, 'YYYY-MM') AS MONTH,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2025-12-01'
+      GROUP BY TO_CHAR(INVOICE_DATE, 'YYYY-MM')
+      ORDER BY MONTH
+    intent: time_series
+    entities: ["month"]
+    tags: ["time_series", "spend", "month", "recent"]
+    difficulty: medium
+
+  - id: "ex068"
+    question: "Supplier spend evolution by month in current fiscal year"
+    sql: |
+      SELECT SUPPLIER_NAME,
+        TO_CHAR(INVOICE_DATE, 'YYYY-MM') AS MONTH,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS MONTHLY_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2025-04-01'
+        AND INVOICE_DATE <= DATE '2026-03-31'
+      GROUP BY SUPPLIER_NAME, TO_CHAR(INVOICE_DATE, 'YYYY-MM')
+      ORDER BY SUPPLIER_NAME, MONTH
+    intent: time_series
+    entities: ["supplier", "year", "month"]
+    tags: ["time_series", "spend", "supplier", "month", "fiscal_year"]
+    difficulty: medium
+
+  - id: "ex069"
+    question: "Spend in June 2025"
+    sql: |
+      SELECT SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2025-06-01'
+        AND INVOICE_DATE <= DATE '2025-06-30'
+    intent: filtered_aggregation
+    entities: ["month", "year"]
+    tags: ["aggregation", "spend", "month", "date_range"]
+    difficulty: easy
+
+  - id: "ex070"
+    question: "Fiscal year spend progression by region"
+    sql: |
+      SELECT REGION, G_JAHR AS FISCAL_YEAR,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS TOTAL_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      GROUP BY REGION, G_JAHR
+      ORDER BY REGION, G_JAHR
+    intent: time_series
+    entities: ["region", "year"]
+    tags: ["time_series", "spend", "region", "fiscal_year"]
+    difficulty: medium
+
+  - id: "ex071"
+    question: "Month over month spend change in current fiscal year"
+    sql: |
+      SELECT MONTH, MONTHLY_SPEND_EUR,
+        LAG(MONTHLY_SPEND_EUR) OVER (ORDER BY MONTH) AS PREV_MONTH_EUR,
+        ROUND((MONTHLY_SPEND_EUR - LAG(MONTHLY_SPEND_EUR) OVER (ORDER BY MONTH)) /
+          NULLIF(LAG(MONTHLY_SPEND_EUR) OVER (ORDER BY MONTH), 0) * 100, 2) AS MOM_CHANGE_PCT
+      FROM (
+        SELECT TO_CHAR(INVOICE_DATE, 'YYYY-MM') AS MONTH,
+          SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS MONTHLY_SPEND_EUR
+        FROM VW_SPEND_REPORT_VIEW
+        WHERE INVOICE_DATE >= DATE '2025-04-01'
+          AND INVOICE_DATE <= DATE '2026-03-31'
+        GROUP BY TO_CHAR(INVOICE_DATE, 'YYYY-MM')
+      )
+      ORDER BY MONTH
+    intent: time_series
+    entities: ["year", "month"]
+    tags: ["time_series", "spend", "month", "fiscal_year", "window", "mom"]
+    difficulty: hard
+
+  - id: "ex072"
+    question: "Quarterly commodity spend in current fiscal year"
+    sql: |
+      SELECT COMMODITY_DESCRIPTION,
+        CASE
+          WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2025-06-30' THEN 'Q1'
+          WHEN INVOICE_DATE >= DATE '2025-07-01' AND INVOICE_DATE <= DATE '2025-09-30' THEN 'Q2'
+          WHEN INVOICE_DATE >= DATE '2025-10-01' AND INVOICE_DATE <= DATE '2025-12-31' THEN 'Q3'
+          WHEN INVOICE_DATE >= DATE '2026-01-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN 'Q4'
+        END AS FISCAL_QUARTER,
+        SUM(ROUND(AMOUNT / EXCH_RATE, 2)) AS QUARTERLY_SPEND_EUR
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE >= DATE '2025-04-01'
+        AND INVOICE_DATE <= DATE '2026-03-31'
+      GROUP BY COMMODITY_DESCRIPTION,
+        CASE
+          WHEN INVOICE_DATE >= DATE '2025-04-01' AND INVOICE_DATE <= DATE '2025-06-30' THEN 'Q1'
+          WHEN INVOICE_DATE >= DATE '2025-07-01' AND INVOICE_DATE <= DATE '2025-09-30' THEN 'Q2'
+          WHEN INVOICE_DATE >= DATE '2025-10-01' AND INVOICE_DATE <= DATE '2025-12-31' THEN 'Q3'
+          WHEN INVOICE_DATE >= DATE '2026-01-01' AND INVOICE_DATE <= DATE '2026-03-31' THEN 'Q4'
+        END
+      ORDER BY COMMODITY_DESCRIPTION, FISCAL_QUARTER
+    intent: time_series
+    entities: ["commodity", "quarter"]
+    tags: ["time_series", "spend", "commodity", "quarter", "fiscal_year"]
+    difficulty: medium
+
+  - id: "ex073"
+    question: "List all suppliers in Iberica region"
+    sql: |
+      SELECT DISTINCT SUPPLIER_NAME
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE REGION = 'Iberica'
+        AND INVOICE_DATE > DATE '2024-04-01'
+      ORDER BY SUPPLIER_NAME
+    intent: enumerate
+    entities: ["supplier", "region"]
+    tags: ["enumerate", "supplier", "region"]
+    difficulty: easy
+
+  - id: "ex074"
+    question: "What are the available material types"
+    sql: |
+      SELECT DISTINCT MATERIAL_TYPE
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE MATERIAL_TYPE IS NOT NULL
+        AND INVOICE_DATE > DATE '2024-04-01'
+      ORDER BY MATERIAL_TYPE
+    intent: enumerate
+    entities: ["material_type"]
+    tags: ["enumerate", "material_type"]
+    difficulty: easy
+
+  - id: "ex075"
+    question: "Show all plants ordered by name"
+    sql: |
+      SELECT DISTINCT PLANT_NAME
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE INVOICE_DATE > DATE '2024-04-01'
+      ORDER BY PLANT_NAME
+    intent: enumerate
+    entities: ["plant"]
+    tags: ["enumerate", "plant"]
+    difficulty: easy
+
+  - id: "ex076"
+    question: "Get all commodities used by supplier Bosch"
+    sql: |
+      SELECT DISTINCT COMMODITY_DESCRIPTION
+      FROM VW_SPEND_REPORT_VIEW
+      WHERE UPPER(SUPPLIER_NAME) LIKE UPPER('%Bosch%')
+        AND INVOICE_DATE > DATE '2024-04-01'
+      ORDER BY COMMODITY_DESCRIPTION
+    intent: enumerate
+    entities: ["commodity", "supplier"]
+    tags: ["enumerate", "commodity", "supplier", "text_filter"]
+    difficulty: medium
