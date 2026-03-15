@@ -1228,8 +1228,8 @@ A SQL query was generated for the user's question but it FAILED.
                 if "0 rows" not in w:  # already handled above
                     parts.append(f"\n> **Note:** {w}")
 
-        # Embed data_json OUTSIDE details so Worker Node LLM always sees it
-        # (needed for DataVisualizer follow-up "plot this")
+        # Embed data_json for DataVisualizer follow-up ("plot this")
+        # Wrapped in HTML comment so it's invisible to users but accessible to the LLM agent
         if columns and rows:
             serializable_rows = []
             for row in rows:
@@ -1243,7 +1243,7 @@ A SQL query was generated for the user's question but it FAILED.
                         serializable_row.append(str(v))
                 serializable_rows.append(serializable_row)
             data_json_obj = {"columns": columns, "rows": serializable_rows}
-            parts.append(f"\n<data_json>{json.dumps(data_json_obj)}</data_json>")
+            parts.append(f"\n<!-- data_json:{json.dumps(data_json_obj)} -->")
 
         results_section = "\n".join(parts)
 

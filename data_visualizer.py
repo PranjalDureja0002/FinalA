@@ -13,6 +13,7 @@ import json
 import base64
 import io
 import re
+import time
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -135,8 +136,18 @@ Return ONLY the JSON."""
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _try_parse_data_json(text):
-    """Try to extract structured data from <data_json> tags or raw JSON."""
-    # Try <data_json> tags
+    """Try to extract structured data from data_json (HTML comment or tag format)."""
+    # Try HTML comment format: <!-- data_json:{...} -->
+    comment_match = re.search(r'<!--\s*data_json:(.*?)\s*-->', text, re.DOTALL)
+    if comment_match:
+        try:
+            data = json.loads(comment_match.group(1).strip())
+            if data.get("columns") and data.get("rows"):
+                return data, text[comment_match.end():].strip()
+        except json.JSONDecodeError:
+            pass
+
+    # Try <data_json> tags (legacy format)
     tag_match = re.search(r'<data_json>(.*?)</data_json>', text, re.DOTALL)
     if tag_match:
         try:
@@ -217,8 +228,24 @@ def _chart_to_base64(fig):
     return b64
 
 
-def _render_chart(plan, columns, rows, style_name):
-    """Render a chart based on the LLM's plan."""
+def _chart_to_file(fig):
+    """Save chart to a temp file and return the path.
+
+    Returns a file path that can be passed via Message(files=[path]).
+    The AgentCore framework serves it via /files/images/ endpoint.
+    """
+    import tempfile
+    import os
+    temp_dir = tempfile.gettempdir()
+    # Use a unique filename to avoid collisions
+    filename = f"chart_{int(time.time() * 1000)}.png"
+    filepath = os.path.join(temp_dir, filename)
+    fig.savefig(filepath, format="png", dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
+    return filepath
+
+
+def _render_chart_fig(plan, columns, rows, style_name):
+    """Render a chart based on the LLM's plan. Returns the matplotlib figure object."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -422,9 +449,7 @@ def _render_chart(plan, columns, rows, style_name):
                  style="italic", alpha=0.7)
 
     plt.tight_layout()
-    b64 = _chart_to_base64(fig)
-    plt.close(fig)
-    return b64
+    return fig
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -513,10 +538,23 @@ class CodeEditorNode(Node):
             if chart_type == "table":
                 return self._render_as_table(columns, rows, plan.get("title", "Data"))
 
-            b64_image = _render_chart(plan, columns, rows, self.chart_style)
+            # Render the chart
+            import matplotlib
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
 
+            fig = _render_chart_fig(plan, columns, rows, self.chart_style)
+
+            # Try file-based approach first (fast, no streaming base64)
+            chart_file = None
+            try:
+                chart_file = _chart_to_file(fig)
+            except Exception:
+                pass
+
+            title = plan.get("title", "Chart")
             parts = []
-            parts.append(f"![{plan.get('title', 'Chart')}](data:image/png;base64,{b64_image})")
+            parts.append(f"**{title}**")
             parts.append(f"\n*{chart_type.replace('_', ' ').title()} chart — {len(rows)} data points*")
 
             # Add insight annotation if available
@@ -525,12 +563,22 @@ class CodeEditorNode(Node):
                 parts.append(f"\n> {annotations[0]}")
 
             # Echo back data_json so follow-up chart modifications have data available
-            # (e.g. "change x axis to supplier name" needs the data from this response)
             data_json_obj = {"columns": columns, "rows": rows}
-            parts.append(f"\n<data_json>{json.dumps(data_json_obj)}</data_json>")
+            parts.append(f"\n<!-- data_json:{json.dumps(data_json_obj)} -->")
 
             self.status = f"{chart_type} | {len(rows)} rows"
-            return Message(text="\n".join(parts))
+
+            if chart_file:
+                # File-based: framework serves image via /files/images/ endpoint
+                # No base64 streaming — instant delivery
+                plt.close(fig)
+                return Message(text="\n".join(parts), files=[chart_file])
+            else:
+                # Fallback: base64 inline (slower, but works everywhere)
+                b64_image = _chart_to_base64(fig)
+                plt.close(fig)
+                parts.insert(0, f"![{title}](data:image/png;base64,{b64_image})")
+                return Message(text="\n".join(parts))
 
         except Exception as e:
             self.status = f"Chart error: {e}"
