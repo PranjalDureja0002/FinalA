@@ -220,6 +220,7 @@ def _try_parse_markdown_table(text):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _chart_to_base64(fig):
+    """Original base64 encoder (PNG, high quality)."""
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
     buf.seek(0)
@@ -228,20 +229,22 @@ def _chart_to_base64(fig):
     return b64
 
 
-def _chart_to_file(fig):
-    """Save chart to a temp file and return the path.
+def _chart_to_base64_optimized(fig):
+    """Optimized base64 encoder — smaller output for faster streaming.
 
-    Returns a file path that can be passed via Message(files=[path]).
-    The AgentCore framework serves it via /files/images/ endpoint.
+    Uses lower DPI (100 vs 150) and PNG compression.
+    Typical output: ~30-50KB base64 vs ~100-150KB original.
     """
-    import tempfile
-    import os
-    temp_dir = tempfile.gettempdir()
-    # Use a unique filename to avoid collisions
-    filename = f"chart_{int(time.time() * 1000)}.png"
-    filepath = os.path.join(temp_dir, filename)
-    fig.savefig(filepath, format="png", dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
-    return filepath
+    import matplotlib.pyplot as plt
+    plt.tight_layout()
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=100, bbox_inches="tight",
+                facecolor=fig.get_facecolor(), pad_inches=0.2)
+    buf.seek(0)
+    b64 = base64.b64encode(buf.read()).decode("utf-8")
+    buf.close()
+    plt.close(fig)
+    return b64
 
 
 def _render_chart_fig(plan, columns, rows, style_name):
@@ -538,23 +541,13 @@ class CodeEditorNode(Node):
             if chart_type == "table":
                 return self._render_as_table(columns, rows, plan.get("title", "Data"))
 
-            # Render the chart
-            import matplotlib
-            matplotlib.use("Agg")
-            import matplotlib.pyplot as plt
-
+            # Render the chart — base64 inline (tool framework strips Message.files)
             fig = _render_chart_fig(plan, columns, rows, self.chart_style)
-
-            # Try file-based approach first (fast, no streaming base64)
-            chart_file = None
-            try:
-                chart_file = _chart_to_file(fig)
-            except Exception:
-                pass
+            b64_image = _chart_to_base64_optimized(fig)
 
             title = plan.get("title", "Chart")
             parts = []
-            parts.append(f"**{title}**")
+            parts.append(f"![{title}](data:image/png;base64,{b64_image})")
             parts.append(f"\n*{chart_type.replace('_', ' ').title()} chart — {len(rows)} data points*")
 
             # Add insight annotation if available
@@ -567,18 +560,7 @@ class CodeEditorNode(Node):
             parts.append(f"\n<!-- data_json:{json.dumps(data_json_obj)} -->")
 
             self.status = f"{chart_type} | {len(rows)} rows"
-
-            if chart_file:
-                # File-based: framework serves image via /files/images/ endpoint
-                # No base64 streaming — instant delivery
-                plt.close(fig)
-                return Message(text="\n".join(parts), files=[chart_file])
-            else:
-                # Fallback: base64 inline (slower, but works everywhere)
-                b64_image = _chart_to_base64(fig)
-                plt.close(fig)
-                parts.insert(0, f"![{title}](data:image/png;base64,{b64_image})")
-                return Message(text="\n".join(parts))
+            return Message(text="\n".join(parts))
 
         except Exception as e:
             self.status = f"Chart error: {e}"
