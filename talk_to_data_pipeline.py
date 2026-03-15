@@ -1278,7 +1278,14 @@ A SQL query was generated for the user's question but it FAILED.
             details.append(f"2. **Schema Linking** — {', '.join(mappings)}")
             ents = sl.get("detected_entities", [])
             if ents:
-                details.append(f"   - Entities: {', '.join(ents)}")
+                # Normalize: LLM may return entities as dicts or strings
+                ent_names = []
+                for e in ents:
+                    if isinstance(e, dict):
+                        ent_names.append(e.get("name", e.get("entity", str(e))))
+                    else:
+                        ent_names.append(str(e))
+                details.append(f"   - Entities: {', '.join(ent_names)}")
 
         details.append(f"3. **Context** — ~{tok_est} tokens, {n_ex}/{tot_ex} examples")
         details.append(f"4. **SQL Generation** — {gen_method.upper()}")
