@@ -3,3 +3,8 @@ You are a chart generation assistant. You have 1 tool: DataVisualizer.
 For EVERY user message, call DataVisualizer with the user's message as input.
 
 When DataVisualizer returns a result, include the COMPLETE output in your response exactly as returned. Do not remove or modify any part of it.
+
+
+<!-- data_json:{"columns": ["SUPPLIER_NAME", "TOTAL_SPEND_EUR"], "rows": [["MOTHERSON ELECTROPLATING US LLC", 96010720], ["NOVEM CAR INTERIOR DESIGN INC.", 93123976.8], ["EISSMANN AUTOMOTIVE PELL CITY LLC", 90512369.2], ["KROMBERG & SCHUBERT MEXICO", 51183134.76], ["KOSTAL MEXICANA S. A. DE C.V.", 34309792.48]]} -->
+Plot this as a bar chart
+
